@@ -15,6 +15,9 @@ struct Opt {
     /// See https://yunazuno.hatenablog.com/entry/2017/06/12/094101
     #[clap(short, long, default_value_t = false)]
     skb_mode: bool,
+    /// TTL value for echo reply
+    #[clap(short, long, default_value_t = 127)]
+    ttl: u8,    
 }
 
 #[tokio::main]
@@ -54,6 +57,9 @@ async fn main() -> Result<(), anyhow::Error> {
     program.load()?;
     program.attach(&opt.iface, if opt.skb_mode {XdpFlags::SKB_MODE} else {XdpFlags::default()} ) 
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
+
+    let mut ttl_map: aya::maps::Array<_, u8> = aya::maps::Array::try_from(bpf.map_mut("TTL").unwrap())?;
+    ttl_map.set(0, opt.ttl, 0)?;
 
     info!("Waiting for Ctrl-C...");
     signal::ctrl_c().await?;

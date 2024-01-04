@@ -2,7 +2,7 @@
 #![no_main]
 
 use aya_bpf::helpers::bpf_csum_diff;
-use aya_bpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
+use aya_bpf::{bindings::xdp_action, macros::xdp, macros::map, programs::XdpContext};
 use aya_log_ebpf::info;
 
 use core::mem;
@@ -12,6 +12,10 @@ use network_types::icmp::IcmpHdr;
 
 const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
 const ICMP_TYPE_ECHO_REPLY: u8 = 0;
+const DEFAULT_TTL: u8 = 127;
+
+#[map]
+static TTL: aya_bpf::maps::Array<u8> = aya_bpf::maps::Array::with_max_entries(1, 0);
 
 #[xdp]
 pub fn hello_aya(ctx: XdpContext) -> u32 {
@@ -87,8 +91,8 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
         (*iphdr).src_addr = (*iphdr).dst_addr;
         (*iphdr).dst_addr = orig_src_addr;
 
-        // sysctl net.ipv4.ip_default_ttl to check the default value (without eBPF)
-        (*iphdr).ttl = 27;  // randomly chosen value, just to make the packet changed somehow
+        let new_ttl: u8 = *TTL.get(0).unwrap_or(&DEFAULT_TTL);
+        (*iphdr).ttl = new_ttl;
         
         (*iphdr).check = 0;
         (*iphdr).check = fold_checksum(
