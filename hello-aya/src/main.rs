@@ -10,6 +10,11 @@ use tokio::signal;
 struct Opt {
     #[clap(short, long, default_value = "eth0")]
     iface: String,
+    /// use generic XDP, which does not require NIC support
+    /// 
+    /// See https://yunazuno.hatenablog.com/entry/2017/06/12/094101
+    #[clap(short, long, default_value_t = false)]
+    skb_mode: bool,
 }
 
 #[tokio::main]
@@ -47,7 +52,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     let program: &mut Xdp = bpf.program_mut("hello_aya").unwrap().try_into()?;
     program.load()?;
-    program.attach(&opt.iface, XdpFlags::default())
+    program.attach(&opt.iface, if opt.skb_mode {XdpFlags::SKB_MODE} else {XdpFlags::default()} ) 
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
     info!("Waiting for Ctrl-C...");
