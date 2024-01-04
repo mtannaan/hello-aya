@@ -11,6 +11,8 @@ hello-aya-common = { path = "../hello-aya-common" }
 [[bin]]
 name = "hello-aya"
 path = "src/main.rs"
+test = false
+bench = false
 
 [profile.dev]
 opt-level = 3
