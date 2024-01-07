@@ -10,6 +10,7 @@ use network_types::ip::{Ipv4Hdr, IpProto};
 use network_types::icmp::IcmpHdr;
 
 const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
+const ICMP_TYPE_ECHO_REPLY: u8 = 0;
 
 #[xdp]
 pub fn hello_aya(ctx: XdpContext) -> u32 {
@@ -23,21 +24,21 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
     let mut cursor = 0usize;
 
     // eth -> ip
-    let ethhdr: *const EthHdr = ptr_at(&ctx, cursor)?; 
+    let ethhdr: *mut EthHdr = mut_ptr_at(&ctx, cursor)?; 
     cursor += EthHdr::LEN;
     if unsafe {(*ethhdr).ether_type} != EtherType::Ipv4 {
         return Ok(xdp_action::XDP_PASS)
     }
 
     // ip -> icmp
-    let iphdr: *const Ipv4Hdr = ptr_at(&ctx, cursor)?;
+    let iphdr: *mut Ipv4Hdr = mut_ptr_at(&ctx, cursor)?;
     cursor += Ipv4Hdr::LEN;
     if unsafe {(*iphdr).proto} != IpProto::Icmp {
         return Ok(xdp_action::XDP_PASS)
     }
 
     // icmp -> echo request
-    let icmphdr: *const IcmpHdr = ptr_at(&ctx, cursor)?;
+    let icmphdr: *mut IcmpHdr = mut_ptr_at(&ctx, cursor)?;
     cursor += IcmpHdr::LEN;
     if unsafe {(*icmphdr).type_} != ICMP_TYPE_ECHO_REQUEST {
         return Ok(xdp_action::XDP_PASS)
@@ -61,7 +62,28 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
         u16::from_be(icmp_echo_req.sequence),
     );
 
-    Ok(xdp_action::XDP_PASS)
+    // update icmp
+    unsafe {
+        (*icmphdr).type_ = ICMP_TYPE_ECHO_REPLY; // == 0
+    }
+
+    // update ip
+    unsafe {
+        let orig_src_addr = (*iphdr).src_addr;
+        (*iphdr).src_addr = (*iphdr).dst_addr;
+        (*iphdr).dst_addr = orig_src_addr;
+    }
+
+    // update eth
+    unsafe {
+        let orig_src_addr = (*ethhdr).src_addr;
+        (*ethhdr).src_addr = (*ethhdr).dst_addr;
+        (*ethhdr).dst_addr = orig_src_addr;
+    }
+
+    info!(&ctx, "sending an echo reply");
+
+    Ok(xdp_action::XDP_TX)
 }
 
 #[panic_handler]
@@ -82,4 +104,9 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
     }
 
     Ok((start + offset) as *const T)
+}
+
+#[inline(always)]
+fn mut_ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*mut T, ()> {
+    Ok(ptr_at::<T>(ctx, offset)? as *mut T)
 }
