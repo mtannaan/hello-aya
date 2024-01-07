@@ -7,7 +7,7 @@ use aya_log_ebpf::info;
 use core::mem;
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{Ipv4Hdr, IpProto};
-use network_types::icmp::{IcmpHdr, IcmpHdrEcho};
+use network_types::icmp::IcmpHdr;
 
 const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
 
@@ -42,8 +42,25 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
     if unsafe {(*icmphdr).type_} != ICMP_TYPE_ECHO_REQUEST {
         return Ok(xdp_action::XDP_PASS)
     }
+    let icmp_echo_req = unsafe { (*icmphdr).un.echo };
 
-    info!(&ctx, "received an icmp echo request");
+    // log packet contents
+    let orig_ip_src_addr = unsafe { (*iphdr).src_addr };
+    let orig_ip_src_addr_native_endian = u32::from_be(orig_ip_src_addr);
+    info!(
+        &ctx,
+        "received an icmp echo request src={}.{}.{}.{} ihl={} len={} ttl={} id={} seq={}",
+        (orig_ip_src_addr_native_endian >> 24) & 0xff,
+        (orig_ip_src_addr_native_endian >> 16) & 0xff,
+        (orig_ip_src_addr_native_endian >> 8) & 0xff,
+        (orig_ip_src_addr_native_endian >> 0) & 0xff,
+        unsafe { (*iphdr).ihl() },
+        u16::from_be(unsafe { (*iphdr).tot_len }),
+        unsafe { (*iphdr).ttl },
+        u16::from_be(icmp_echo_req.id),
+        u16::from_be(icmp_echo_req.sequence),
+    );
+
     Ok(xdp_action::XDP_PASS)
 }
 
@@ -52,6 +69,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
 
+/// bound-checked pointer
+/// see https://aya-rs.dev/book/start/parsing-packets/#starting-out
 #[inline(always)]
 fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
     let start = ctx.data();
