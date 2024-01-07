@@ -86,6 +86,18 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
         let orig_src_addr = (*iphdr).src_addr;
         (*iphdr).src_addr = (*iphdr).dst_addr;
         (*iphdr).dst_addr = orig_src_addr;
+
+        // sysctl net.ipv4.ip_default_ttl to check the default value (without eBPF)
+        (*iphdr).ttl = 27;  // randomly chosen value, just to make the packet changed somehow
+        
+        (*iphdr).check = 0;
+        (*iphdr).check = fold_checksum(
+            bpf_csum_diff(
+                    0 as *mut u32, 0,
+                    iphdr as *mut u32, Ipv4Hdr::LEN as u32,
+                    0u32
+                )
+        );
     }
 
     // update eth
