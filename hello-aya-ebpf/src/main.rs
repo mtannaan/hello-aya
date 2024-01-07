@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use aya_bpf::helpers::bpf_csum_diff;
 use aya_bpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
 use aya_log_ebpf::info;
 
@@ -64,7 +65,20 @@ fn try_hello_aya(ctx: XdpContext) -> Result<u32, ()> {
 
     // update icmp
     unsafe {
+        let orig_csum = (*icmphdr).checksum;
+        (*icmphdr).checksum = 0;
+
+        // calculate checksum after clearing the current icmp type field
+        let new_csum = fold_checksum(
+            bpf_csum_diff(
+                    icmphdr as *mut u32, 4, 
+                    0 as *mut u32, 0,
+                    !orig_csum as u32
+                )
+        );
+
         (*icmphdr).type_ = ICMP_TYPE_ECHO_REPLY; // == 0
+        (*icmphdr).checksum = new_csum;
     }
 
     // update ip
@@ -109,4 +123,15 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
 #[inline(always)]
 fn mut_ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*mut T, ()> {
     Ok(ptr_at::<T>(ctx, offset)? as *mut T)
+}
+
+/// folds i64 intermediate checksum into u16 one's complement
+#[inline(always)]
+fn fold_checksum(sum: i64) -> u16 {
+    let mut csum = sum;
+    csum = (csum & 0xffff) + (csum >> 16);
+    csum = (csum & 0xffff) + (csum >> 16);
+    csum = (csum & 0xffff) + (csum >> 16);
+    csum = (csum & 0xffff) + (csum >> 16);
+    return !csum as u16;
 }
